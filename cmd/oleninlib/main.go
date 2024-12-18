@@ -26,25 +26,11 @@ func main() {
 func run(log zerolog.Logger) error {
 	log.Info().Msg("запущен")
 
-	var wg sync.WaitGroup
-
-	sigCh := make(chan os.Signal, 1)
-	quitCh := make(chan bool, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	// обработка CTRL+C
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-sigCh
-		quitCh <- true
-		log.Info().Msg("Перехвачен CTRL+C. Завершение работы")
-	}()
-
-	err := godotenv.Load()
-	if err != nil {
-		return err
-	}
+	//err :=
+	godotenv.Load()
+	// if err != nil {
+	// 	return err
+	// }
 	apiToken, exist := os.LookupEnv("TG_TOKEN")
 	if !exist || len(apiToken) == 0 {
 		return errors.New("TG_TOKEN не определен")
@@ -65,13 +51,29 @@ func run(log zerolog.Logger) error {
 	}
 	updates := bot.GetUpdatesChan(updateConfig)
 
+	var wg sync.WaitGroup
+
+	sigCh := make(chan os.Signal, 1) //для обработки CTRL+C
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	quitCh := make(chan bool, 1) // для завершения главного цикла обработки
+
+	// обработка CTRL+C
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-sigCh
+		quitCh <- true
+		log.Info().Msg("Перехвачен CTRL+C. Завершение работы")
+	}()
+
 	// главный цикл обработки сообщений
 	wg.Add(1)
 	go Update(bot, log, &wg, updates, quitCh)
 
 	wg.Wait()
-
 	log.Info().Msg("завершен успешно")
+
 	return nil
 }
 
@@ -97,12 +99,37 @@ func Update(
 				continue
 			}
 
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "OLB says: "+update.Message.Text)
-			msg.ReplyToMessageID = update.Message.MessageID
-
-			if _, err := bot.Send(msg); err != nil {
-				log.Error().Err(err).Send()
+			switch update.Message.Command() {
+			case "help":
+				processHelpCommand(bot, log, update.Message)
+			default:
+				processEchoText(bot, log, update.Message)
 			}
 		}
+	}
+}
+
+func processHelpCommand(
+	bot *tgbotapi.BotAPI,
+	log zerolog.Logger,
+	inputMessage *tgbotapi.Message) {
+
+	out := tgbotapi.NewMessage(
+		inputMessage.Chat.ID,
+		"/help - help")
+	if _, err := bot.Send(out); err != nil {
+		log.Error().Err(err).Send()
+	}
+}
+func processEchoText(
+	bot *tgbotapi.BotAPI,
+	log zerolog.Logger,
+	inputMessage *tgbotapi.Message) {
+
+	out := tgbotapi.NewMessage(inputMessage.Chat.ID, "OLB says: "+inputMessage.Text)
+	out.ReplyToMessageID = inputMessage.MessageID
+
+	if _, err := bot.Send(out); err != nil {
+		log.Error().Err(err).Send()
 	}
 }
